@@ -5,13 +5,15 @@ Edit History
     See Research Journal
 '''
 import sys
-import numpy as N 
+import numpy as N
+import numpy as np
 #import scipy
 #import scipy.optimize
-from openopt import NLSP
+#import OpenOpt
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+a, b, c, alpha, beta, gamma, h1, k1, l1, omega1, chi1, phi1, h2, k2, l2, omega2, chi2, phi2=3.9091,3.9091,3.9091,90,90,90,1,0,0,0,0,17.59,0,0,1,0,90,17.59
 
 def genout(s):
    myerr=open('/tmp/calcerr.txt','w')
@@ -49,7 +51,7 @@ def star(a,b,c,alpha,beta,gamma):
 
 def calcB(astar,bstar,cstar,alphastar,betastar,gammastar,c, alpha):
    "Calculates the B matrix using the crystal dimensions calculated in the 'star' method"
-   print((astar,bstar,cstar,alphastar,betastar,gammastar,c, alpha))
+#   print((astar,bstar,cstar,alphastar,betastar,gammastar,c, alpha))
    alphastar = N.radians(alphastar)
    betastar = N.radians(betastar)
    gammastar = N.radians(gammastar)
@@ -59,7 +61,6 @@ def calcB(astar,bstar,cstar,alphastar,betastar,gammastar,c, alpha):
                     [0, bstar*N.sin(gammastar), -cstar*N.sin(betastar)*N.cos(alpha)],
                     [0, 0, cstar]],'Float64') #check the third element
    #"cstarN.sin(betastar)*N.sin(alpha)" for third element is equivalent
-   print((Bmatrix, "Bmatrix"))
    return Bmatrix
 
 def calcU(h1, k1, l1, h2, k2, l2, omega1, chi1, phi1, omega2, chi2, phi2, Bmatrix):
@@ -256,7 +257,7 @@ def calcIdealAngles(h, UBmatrix, Bmatrix, wavelength, stars):
       
    q = calcq (h[0], h[1], h[2], stars)
    twotheta = N.degrees(2 * N.arcsin(wavelength * q / 4 / N.pi))
-   print(("TwoTheta", twotheta))
+#   print(("TwoTheta", twotheta))
    theta = twotheta / 2
    omega = 0
    #print 'chi',chi, 180-chi
@@ -445,7 +446,7 @@ def UBtestrun():
 #   a, b, c, alpha, beta, gamma, h1, k1, l1, omega1, chi1, phi1, h2, k2, l2, omega2, chi2, phi2=3.9,3.9,3.9,90,90,90,1,0,0,17.59,0,0,1,1,0,25.3,0,0
 #   a, b, c, alpha, beta, gamma, h1, k1, l1, omega1, chi1, phi1, h2, k2, l2, omega2, chi2, phi2=3.9091,3.9091,3.9091,90,90,90,1,1,0,0,0,0,1,-1,0,0,0,90
 #   a, b, c, alpha, beta, gamma, h1, k1, l1, omega1, chi1, phi1, h2, k2, l2, omega2, chi2, phi2=3.9,3.9,3.9,90,90,90,1,0,0,0,0,17.59,1,1,0,0,0,25.3
-   a, b, c, alpha, beta, gamma, h1, k1, l1, omega1, chi1, phi1, h2, k2, l2, omega2, chi2, phi2=3.9091,3.9091,3.9091,90,90,90,1,0,0,0,0,17.59,0,0,1,0,90,17.59
+#   a, b, c, alpha, beta, gamma, h1, k1, l1, omega1, chi1, phi1, h2, k2, l2, omega2, chi2, phi2=3.9091,3.9091,3.9091,90,90,90,1,0,0,0,0,17.59,0,0,1,0,90,17.59
 
    '''
    UB["0"] = -0.8495486120866541
@@ -506,6 +507,68 @@ def UBtestrun():
 # **************************************** END OF UB MATRIX TESTING CODE ****************************************  
 
 
+
+
+# ***************************** ADDED CODE FOR THE ALIGNMENT MACHINE LEARNING PROGRAM *****************************
+def equivalence(Q):
+    for i in range(len(Q)):
+        Q[i] = float(Q[i])
+    q = np.sqrt(Q[0]**2 + Q[1]**2 + Q[2]**2)
+    epsilon = 0.01
+    if (1-epsilon < q < 1+epsilon):
+        return [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]]
+    elif (np.sqrt(2)-epsilon < q < (np.sqrt(2)+epsilon)):
+        return [[1,1,0],[1,0,1],[0,1,1],[1,-1,0],[1,0,-1],[-1,1,0],[-1,0,1],[-1,-1,0],[-1,0,-1],[0,-1,1],[0,-1,-1],[0,1,-1]]
+    elif (np.sqrt(3)-epsilon < q < np.sqrt(3)+epsilon):
+        return [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
+    
+    
+def initial(u1, u2, theta, B):
+    """
+    Finds two reflections (100) and (010) for the crystal so the UB matrix can be calculated
+    
+    """
+    
+    # Currently only works for crystals with the 100 facing the z axis. NEED TO FIX THIS SO IT WORKS FOR ANY CRYSTAL 
+    phi1 = theta
+    chi1 = 90
+    if u2[0] == 0 and u2[1] > 0:
+        phi2 = 90 + theta
+    elif u2[0] == 0 and u2[1] < 0:
+        phi2 = -90+theta
+    else:
+        phi2 = theta + np.rad2deg(np.arctan2(float(u2[1]),u2[0]))
+    chi2 = 0
+    return [1, 0, 0, 0, 1, 0, 0, chi1, phi1, 0, chi2, phi2, B]
+
+def motor_pos(v):
+    """
+    returns the motor positons of the equivalent HKLs. Assumes 100 faces x axis and 010 faces y axis.
+    """
+    stars = star(a, b, c, alpha, beta, gamma)
+    stars_dict = dict(list(zip(('astar','bstar','cstar','alphastar','betastar','gammastar'),stars)))
+    l = []
+    Bmatrix = calcB(*(list(stars)+[c, alpha]))
+    eq = equivalence(v)
+    for i in range(len(eq)):
+        l.append(eq[i])
+    pre = initial([0,1,0], [0,0,1], 17.59, Bmatrix)
+    UB = calcUB(*pre)
+    
+    
+    angles = []
+    for i in range(len(l)):
+#        print(calcIdealAngles(l[i], UB, Bmatrix, 2.35916, stars_dict)[-2:])
+        angles.append([int(round(calcIdealAngles(l[i], UB, Bmatrix, 2.35916, stars_dict)[-2]))%360, int(round(calcIdealAngles(l[i], UB, Bmatrix, 2.35916, stars_dict)[-1]))%360])
+
+#        angles.append([round(int(calcIdealAngles(l[i], UB, Bmatrix, 2.35916, stars_dict)[-2])%360), round(int(calcIdealAngles(l[i], UB, Bmatrix, 2.35916, stars_dict)[-1]%360))])
+#        print(angles, "a")
+#        angles[i]=round(angles[i])
+#    return np.array_split(angles, len(l))
+    return angles
+
+# ***************************** END OF MACHINE LEARNING PROGRAM CODE *****************************
+
 if __name__=="__main__":
    pi=N.pi
    a=3.9; b=3.9; c=3.9
@@ -515,5 +578,6 @@ if __name__=="__main__":
    print (recip)
    UBtestrun()
    print('done!')
+   print(motor_pos([1,1,1]))
 #   print(twotheta)
 
